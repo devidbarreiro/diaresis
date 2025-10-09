@@ -2,6 +2,8 @@
 
 API REST para separación automática de voces en archivos de audio/video usando IA.
 
+🚀 **Auto-deployed via GitHub Actions**
+
 ## 🚀 Inicio Rápido
 
 ### 1. Configurar token
