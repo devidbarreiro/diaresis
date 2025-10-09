@@ -1,0 +1,9 @@
+numpy==2.2.2
+torch
+torchaudio
+pyannote.audio
+pathlib
+ffmpeg-python
+python-dotenv
+psutil
+onnxruntime
