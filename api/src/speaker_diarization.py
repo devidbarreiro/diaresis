@@ -346,16 +346,23 @@ def save_chunk_audio(waveform, sample_rate, chunk_id, output_dir):
                    channels_first=True, format="wav")
     return chunk_file
 
-def separate_speakers_optimized(waveform, sample_rate, speakers, archivo):
+def separate_speakers_optimized(waveform, sample_rate, speakers, archivo, job_id=None):
     """Separa cada speaker en archivos individuales de forma optimizada"""
     import torch
     import torchaudio
     
     print("✂️ Separando speakers...")
     
-    # Crear directorio de salida
-    output_dir = Path("output")
-    output_dir.mkdir(exist_ok=True)
+    # Crear directorio de salida base (ruta absoluta)
+    output_base = Path("output").absolute()
+    output_base.mkdir(exist_ok=True)
+    
+    # Si hay job_id, crear carpeta específica para el job
+    if job_id:
+        output_dir = output_base / job_id
+        output_dir.mkdir(exist_ok=True)
+    else:
+        output_dir = output_base
     
     nombre_base = Path(archivo).stem
     
@@ -373,7 +380,7 @@ def separate_speakers_optimized(waveform, sample_rate, speakers, archivo):
                 pista[:, s1:s2] = waveform[:, s1:s2]
                 tiempo_total += (end - start)
         
-        salida = output_dir / f"{nombre_base}_persona_{idx+1}.wav"
+        salida = output_dir / f"speaker_{idx}.wav"
         # Guardar con configuración optimizada
         torchaudio.save(str(salida), pista, sample_rate, 
                        channels_first=True, format="wav")

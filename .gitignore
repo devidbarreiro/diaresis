@@ -70,6 +70,7 @@ output/
 temp/
 tmp/
 chunks/
+data/
 
 # Model cache (pyannote)
 .cache/
@@ -101,6 +102,5 @@ dmypy.json
 # Logs
 *.log
 api.log
-*.sh
-/commands/
+/scripts/
 /docs/

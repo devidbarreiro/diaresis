@@ -1,15 +1,18 @@
 version: '3.8'
 
 services:
+  # API Backend (Flask)
   diaresis-api:
-    build: .
+    build: ./api
     container_name: diaresis-api
     ports:
       - "5000:5000"
     volumes:
       - ./uploads:/app/uploads
       - ./output:/app/output
-      - ./.env:/app/.env
+      - ./data:/app/data
+    env_file:
+      - .env
     environment:
       - PYTHONUNBUFFERED=1
     restart: unless-stopped
@@ -19,3 +22,26 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - diaresis-network
+
+  # Frontend (Next.js)
+  diaresis-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: diaresis-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://gravity.cc
+    depends_on:
+      - diaresis-api
+    restart: unless-stopped
+    networks:
+      - diaresis-network
+
+networks:
+  diaresis-network:
+    driver: bridge
+

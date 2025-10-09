@@ -18,6 +18,7 @@ from functools import wraps
 
 # Importar funciones del módulo de diarización
 import speaker_diarization
+import database as db
 
 load_env_token = speaker_diarization.load_env_token
 check_dependencies = speaker_diarization.check_dependencies
@@ -62,8 +63,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuración
-UPLOAD_FOLDER = 'uploads'
-OUTPUT_FOLDER = 'output'
+UPLOAD_FOLDER = Path('uploads').absolute()
+OUTPUT_FOLDER = Path('output').absolute()
 ALLOWED_EXTENSIONS = {'wav', 'mp3', 'm4a', 'flac', 'aac', 'ogg', 'mp4', 'avi', 'mov'}
 MAX_CONTENT_LENGTH = 500 * 1024 * 1024  # 500MB
 
@@ -73,8 +74,9 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs('temp', exist_ok=True)
 
 # Almacenamiento de jobs y métricas
-jobs = {}
-job_lock = threading.Lock()
+# Inicializar base de datos
+db.init_db()
+
 metrics = {
     'total_requests': 0,
     'successful_jobs': 0,
@@ -112,20 +114,11 @@ def allowed_file(filename):
 
 def get_job_status(job_id):
     """Obtiene el estado de un job"""
-    with job_lock:
-        return jobs.get(job_id, None)
+    return db.get_job(job_id)
 
 def update_job_status(job_id, status, progress=0, error=None, result=None):
     """Actualiza el estado de un job"""
-    with job_lock:
-        if job_id in jobs:
-            jobs[job_id].update({
-                'status': status,
-                'progress': progress,
-                'error': error,
-                'result': result,
-                'updated_at': datetime.now().isoformat()
-            })
+    db.update_job(job_id, status=status, progress=progress, error=error, result=result)
 
 def process_audio_job(job_id, file_path, config):
     """Procesa un archivo de audio en un hilo separado"""
@@ -176,7 +169,7 @@ def process_audio_job(job_id, file_path, config):
         
         # Separar speakers
         update_job_status(job_id, 'processing', 90)
-        output_dir, nombre_base = separate_speakers_optimized(waveform, sample_rate, speakers, file_path)
+        output_dir, nombre_base = separate_speakers_optimized(waveform, sample_rate, speakers, file_path, job_id=job_id)
         
         # Preparar resultado
         processing_time = time.time() - start_time
@@ -190,9 +183,9 @@ def process_audio_job(job_id, file_path, config):
             'processing_time': processing_time
         }
         
-        # Listar archivos generados
-        for i in range(1, len(speakers) + 1):
-            output_file = output_dir / f"{nombre_base}_persona_{i}.wav"
+        # Listar archivos generados (ahora con el nuevo formato speaker_0.wav, speaker_1.wav, etc.)
+        for i in range(len(speakers)):
+            output_file = output_dir / f"speaker_{i}.wav"
             if output_file.exists():
                 result['output_files'].append(str(output_file))
         
@@ -310,18 +303,8 @@ def upload_file():
         'num_speakers': int(request.form.get('num_speakers', 2))
     }
     
-    # Crear job
-    with job_lock:
-        jobs[job_id] = {
-            'id': job_id,
-            'filename': filename,
-            'file_path': file_path,
-            'config': config,
-            'status': 'queued',
-            'progress': 0,
-            'created_at': datetime.now(),
-            'updated_at': datetime.now()
-        }
+    # Crear job en la base de datos
+    db.create_job(job_id, filename, file_path, config)
     
     # Iniciar procesamiento en hilo separado
     thread = threading.Thread(target=process_audio_job, args=(job_id, file_path, config))
@@ -347,8 +330,8 @@ def get_job_status_endpoint(job_id):
         'filename': job['filename'],
         'status': job['status'],
         'progress': job['progress'],
-        'created_at': job['created_at'].isoformat(),
-        'updated_at': job['updated_at'].isoformat()
+        'created_at': job['created_at'],
+        'updated_at': job['updated_at']
     }
     
     if job.get('error'):
@@ -370,31 +353,48 @@ def download_speaker_file(job_id, speaker_id):
         return jsonify({'error': 'Job not completed'}), 400
     
     result = job.get('result')
-    if not result or speaker_id >= len(result['output_files']):
-        return jsonify({'error': 'Speaker file not found'}), 404
+    if not result:
+        return jsonify({'error': 'Job result not found'}), 404
     
-    file_path = result['output_files'][speaker_id]
-    if not os.path.exists(file_path):
-        return jsonify({'error': 'File not found on disk'}), 404
+    # Buscar archivo en la carpeta del job
+    file_path = OUTPUT_FOLDER / job_id / f"speaker_{speaker_id}.wav"
     
-    return send_file(file_path, as_attachment=True, download_name=f"speaker_{speaker_id + 1}.wav")
+    if not file_path.exists():
+        return jsonify({'error': f'Speaker file not found: {file_path}'}), 404
+    
+    return send_file(str(file_path), as_attachment=True, download_name=f"speaker_{speaker_id + 1}.wav")
 
 @app.route('/jobs', methods=['GET'])
 def list_jobs():
     """Endpoint para listar todos los jobs"""
-    with job_lock:
-        job_list = []
-        for job_id, job in jobs.items():
-            job_list.append({
-                'id': job['id'],
-                'filename': job['filename'],
-                'status': job['status'],
-                'progress': job['progress'],
-                'created_at': job['created_at'].isoformat(),
-                'updated_at': job['updated_at'].isoformat()
-            })
+    status_filter = request.args.get('status')
+    limit = int(request.args.get('limit', 100))
+    
+    jobs_list = db.get_all_jobs(status=status_filter, limit=limit)
+    
+    # Formatear la respuesta
+    job_list = []
+    for job in jobs_list:
+        job_data = {
+            'id': job['id'],
+            'filename': job['filename'],
+            'status': job['status'],
+            'progress': job['progress'],
+            'created_at': job['created_at'],
+            'updated_at': job['updated_at']
+        }
         
-        return jsonify({'jobs': job_list})
+        # Incluir result si existe
+        if job.get('result'):
+            job_data['result'] = job['result']
+        
+        # Incluir error si existe
+        if job.get('error'):
+            job_data['error'] = job['error']
+        
+        job_list.append(job_data)
+    
+    return jsonify({'jobs': job_list})
 
 @app.route('/system', methods=['GET'])
 def system_info():
