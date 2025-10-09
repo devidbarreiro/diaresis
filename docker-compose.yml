@@ -34,7 +34,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://gravity.cc
+      - NEXT_PUBLIC_API_URL=http://diaresis.xyz
     depends_on:
       - diaresis-api
     restart: unless-stopped
