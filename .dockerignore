@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# Archivos temporales
+*.wav
+*.mp3
+*.mp4
+uploads/
+output/
+temp/
+chunks/
+
+# Logs
+*.log
+
+# Documentación
+*.md
+DEPLOYMENT.md
+README.md
+
+# Scripts de instalación
+install_server.sh
+cleanup.sh
+
+# Tests
+test_*.py
+
+# Environment
+.env.example

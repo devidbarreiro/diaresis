@@ -457,7 +457,7 @@ def main():
     
     # Verificar GPU
     import torch
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda")  # Forzar GPU
     print(f"🖥️ Usando: {device}")
     
     # Cargar y analizar audio
