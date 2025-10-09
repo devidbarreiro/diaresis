@@ -215,15 +215,20 @@ def load_audio_file(file_path):
     """Carga un archivo de audio o video optimizado"""
     import torchaudio
     
-    # Verificar si es un archivo de video
-    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm']
+    # Extensiones que requieren conversión
+    convert_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm', 
+                         '.m4a', '.aac', '.ogg', '.flac', '.wma', '.opus']
+    
+    # Extensiones nativamente compatibles con torchaudio
+    compatible_extensions = ['.wav', '.mp3']
+    
     file_ext = Path(file_path).suffix.lower()
     
-    if file_ext in video_extensions:
-        # Convertir video a audio con configuración optimizada
+    if file_ext in convert_extensions:
+        # Convertir archivo a WAV usando ffmpeg
         temp_audio = convert_video_to_audio(file_path, sample_rate=16000)
         if temp_audio is None:
-            raise ValueError(f"No se pudo convertir el video {file_path}")
+            raise ValueError(f"No se pudo convertir el archivo {file_path}")
         
         print(f"🎵 Cargando audio convertido: {Path(temp_audio).name}")
         waveform, sample_rate = torchaudio.load(temp_audio)
@@ -231,9 +236,23 @@ def load_audio_file(file_path):
         # Limpiar archivo temporal
         import os
         os.unlink(temp_audio)
-    else:
-        print(f"🎵 Cargando audio: {Path(file_path).name}")
+    elif file_ext in compatible_extensions:
+        print(f"🎵 Cargando audio nativo: {Path(file_path).name}")
         waveform, sample_rate = torchaudio.load(file_path)
+    else:
+        # Intentar cargar directamente, si falla, convertir
+        try:
+            print(f"🎵 Intentando cargar directamente: {Path(file_path).name}")
+            waveform, sample_rate = torchaudio.load(file_path)
+        except Exception as e:
+            print(f"⚠️ Error cargando directamente ({e}), convirtiendo...")
+            temp_audio = convert_video_to_audio(file_path, sample_rate=16000)
+            if temp_audio is None:
+                raise ValueError(f"No se pudo procesar el archivo {file_path}: {e}")
+            
+            waveform, sample_rate = torchaudio.load(temp_audio)
+            import os
+            os.unlink(temp_audio)
     
     return waveform, sample_rate
 
