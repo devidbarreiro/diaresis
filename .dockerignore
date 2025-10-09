@@ -30,15 +30,17 @@ chunks/
 
 # Documentación
 *.md
-DEPLOYMENT.md
-README.md
+!README.md
 
-# Scripts de instalación
-install_server.sh
+# Scripts
 cleanup.sh
 
 # Tests
 test_*.py
+
+# Logs
+*.log
+api.log
 
 # Environment
 .env.example

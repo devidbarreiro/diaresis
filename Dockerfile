@@ -16,9 +16,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copiar código de la aplicación
-COPY speaker_diarization.py .
-COPY speaker_diarization_api.py .
-COPY audio_concatenator.py .
+COPY app.py .
+COPY src/ ./src/
 
 # Crear directorios necesarios
 RUN mkdir -p uploads output temp
@@ -30,4 +29,4 @@ EXPOSE 5000
 ENV PYTHONUNBUFFERED=1
 
 # Comando para ejecutar la aplicación
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "600", "speaker_diarization_api:app"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "--timeout", "600", "app:app"]

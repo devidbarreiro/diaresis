@@ -10,15 +10,14 @@ import json
 import uuid
 import tempfile
 import threading
+import logging
 from pathlib import Path
 from datetime import datetime
 import time
+from functools import wraps
 
-# Importar funciones del script original
-import importlib.util
-spec = importlib.util.spec_from_file_location("speaker_diarization", "speaker_diarization.py")
-speaker_diarization = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(speaker_diarization)
+# Importar funciones del módulo de diarización
+import speaker_diarization
 
 load_env_token = speaker_diarization.load_env_token
 check_dependencies = speaker_diarization.check_dependencies
@@ -29,7 +28,6 @@ split_audio_into_chunks = speaker_diarization.split_audio_into_chunks
 run_parallel_diarization = speaker_diarization.run_parallel_diarization
 merge_chunk_results = speaker_diarization.merge_chunk_results
 separate_speakers_optimized = speaker_diarization.separate_speakers_optimized
-print_system_info = speaker_diarization.print_system_info
 load_audio_file = speaker_diarization.load_audio_file
 
 # Flask para API REST
@@ -40,6 +38,17 @@ import torch
 
 app = Flask(__name__)
 CORS(app)  # Permitir CORS para frontend
+
+# Configuración de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('api.log')
+    ]
+)
+logger = logging.getLogger(__name__)
 
 # Configuración
 UPLOAD_FOLDER = 'uploads'
@@ -52,13 +61,38 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 os.makedirs('temp', exist_ok=True)
 
-# Almacenamiento de jobs
+# Almacenamiento de jobs y métricas
 jobs = {}
 job_lock = threading.Lock()
+metrics = {
+    'total_requests': 0,
+    'successful_jobs': 0,
+    'failed_jobs': 0,
+    'total_processing_time': 0,
+    'total_files_processed': 0
+}
+metrics_lock = threading.Lock()
 
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
+
+# Decorador para logging de requests
+def log_request(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        logger.info(f"Request: {request.method} {request.path} - IP: {request.remote_addr}")
+        start_time = time.time()
+        try:
+            result = f(*args, **kwargs)
+            duration = time.time() - start_time
+            logger.info(f"Response: {request.path} - Duration: {duration:.2f}s - Status: 200")
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"Error: {request.path} - Duration: {duration:.2f}s - Error: {str(e)}")
+            raise
+    return decorated_function
 
 def allowed_file(filename):
     """Verifica si el archivo tiene una extensión permitida"""
@@ -84,7 +118,10 @@ def update_job_status(job_id, status, progress=0, error=None, result=None):
 
 def process_audio_job(job_id, file_path, config):
     """Procesa un archivo de audio en un hilo separado"""
+    start_time = time.time()
     try:
+        logger.info(f"Job {job_id}: Iniciando procesamiento de {Path(file_path).name}")
+        
         # Actualizar estado a procesando
         update_job_status(job_id, 'processing', 10)
         
@@ -95,16 +132,16 @@ def process_audio_job(job_id, file_path, config):
         
         # Verificar GPU
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"🖥️ Usando: {device}")
+        logger.info(f"Job {job_id}: Usando dispositivo: {device}")
         
         # Cargar audio
         update_job_status(job_id, 'processing', 20)
-        print(f"🎵 Cargando audio: {Path(file_path).name}")
+        logger.info(f"Job {job_id}: Cargando audio")
         waveform, sample_rate = load_audio_file(file_path)
         
         # Información del audio
         audio_info = get_audio_info(waveform, sample_rate)
-        print_audio_info(audio_info, file_path)
+        logger.info(f"Job {job_id}: Audio info - Duración: {audio_info['duration']:.2f}s, Canales: {audio_info['channels']}")
         
         # Preprocesar
         update_job_status(job_id, 'processing', 30)
@@ -114,7 +151,7 @@ def process_audio_job(job_id, file_path, config):
         update_job_status(job_id, 'processing', 40)
         chunk_duration = config.get('chunk_duration', 60)
         chunks = split_audio_into_chunks(waveform, sample_rate, chunk_duration, overlap=1)
-        print(f"📦 Creados {len(chunks)} chunks")
+        logger.info(f"Job {job_id}: Creados {len(chunks)} chunks de {chunk_duration}s")
         
         # Procesamiento paralelo
         update_job_status(job_id, 'processing', 50)
@@ -124,12 +161,14 @@ def process_audio_job(job_id, file_path, config):
         # Combinar resultados
         update_job_status(job_id, 'processing', 80)
         speakers = merge_chunk_results(chunk_results)
+        logger.info(f"Job {job_id}: Detectados {len(speakers)} speakers")
         
         # Separar speakers
         update_job_status(job_id, 'processing', 90)
         output_dir, nombre_base = separate_speakers_optimized(waveform, sample_rate, speakers, file_path)
         
         # Preparar resultado
+        processing_time = time.time() - start_time
         result = {
             'job_id': job_id,
             'filename': Path(file_path).name,
@@ -137,7 +176,7 @@ def process_audio_job(job_id, file_path, config):
             'speakers_detected': len(speakers),
             'speakers': list(speakers.keys()),
             'output_files': [],
-            'processing_time': time.time() - jobs[job_id]['created_at'].timestamp()
+            'processing_time': processing_time
         }
         
         # Listar archivos generados
@@ -149,11 +188,24 @@ def process_audio_job(job_id, file_path, config):
         # Completar job
         update_job_status(job_id, 'completed', 100, result=result)
         
+        # Actualizar métricas
+        with metrics_lock:
+            metrics['successful_jobs'] += 1
+            metrics['total_processing_time'] += processing_time
+            metrics['total_files_processed'] += 1
+        
+        logger.info(f"Job {job_id}: Completado en {processing_time:.2f}s")
+        
     except Exception as e:
-        print(f"❌ Error procesando job {job_id}: {e}")
+        logger.error(f"Job {job_id}: Error - {str(e)}", exc_info=True)
         update_job_status(job_id, 'failed', error=str(e))
+        
+        # Actualizar métricas
+        with metrics_lock:
+            metrics['failed_jobs'] += 1
 
 @app.route('/health', methods=['GET'])
+@log_request
 def health_check():
     """Endpoint de salud de la API"""
     return jsonify({
@@ -164,9 +216,32 @@ def health_check():
         'dependencies': check_dependencies()
     })
 
+@app.route('/metrics', methods=['GET'])
+@log_request
+def get_metrics():
+    """Endpoint para obtener métricas de la API"""
+    with metrics_lock:
+        avg_processing_time = (metrics['total_processing_time'] / metrics['total_files_processed'] 
+                              if metrics['total_files_processed'] > 0 else 0)
+        
+        return jsonify({
+            'total_requests': metrics['total_requests'],
+            'successful_jobs': metrics['successful_jobs'],
+            'failed_jobs': metrics['failed_jobs'],
+            'total_files_processed': metrics['total_files_processed'],
+            'total_processing_time': round(metrics['total_processing_time'], 2),
+            'average_processing_time': round(avg_processing_time, 2),
+            'success_rate': round((metrics['successful_jobs'] / (metrics['successful_jobs'] + metrics['failed_jobs']) * 100) 
+                                 if (metrics['successful_jobs'] + metrics['failed_jobs']) > 0 else 0, 2)
+        })
+
 @app.route('/upload', methods=['POST'])
+@log_request
 def upload_file():
     """Endpoint para subir archivos de audio"""
+    with metrics_lock:
+        metrics['total_requests'] += 1
+    
     if 'file' not in request.files:
         return jsonify({'error': 'No file provided'}), 400
     

@@ -98,3 +98,8 @@ Pipfile.lock
 dmypy.json
 
 /output/
+# Logs
+*.log
+api.log
+*.sh
+/commands/
