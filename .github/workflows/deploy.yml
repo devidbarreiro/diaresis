@@ -1,0 +1,60 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types: [closed]
+
+jobs:
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.merged == true)
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu/diaresis
+            
+            # Pull latest changes
+            git pull origin main
+            
+            # Stop containers
+            docker-compose down
+            
+            # Rebuild and restart
+            docker-compose up -d --build
+            
+            # Wait for health check
+            sleep 10
+            
+            # Show status
+            docker-compose ps
+            
+            # Check API health
+            curl -f http://localhost:5000/health || exit 1
+            
+            echo "✅ Deployment completed successfully!"
+
+      - name: Notify deployment status
+        if: always()
+        run: |
+          if [ ${{ job.status }} == 'success' ]; then
+            echo "🚀 Deployment successful to gravity.cc"
+          else
+            echo "❌ Deployment failed"
+            exit 1
+          fi
+
