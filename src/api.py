@@ -37,7 +37,18 @@ from werkzeug.utils import secure_filename
 import torch
 
 app = Flask(__name__)
-CORS(app)  # Permitir CORS para frontend
+
+# Configuración CORS permisiva para permitir peticiones desde cualquier origen
+CORS(app, resources={
+    r"/*": {
+        "origins": "*",  # Permite todos los orígenes (Vercel, v0.dev, localhost, etc.)
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+        "expose_headers": ["Content-Disposition", "Content-Length"],
+        "supports_credentials": False,
+        "max_age": 3600  # Cache preflight requests por 1 hora
+    }
+})
 
 # Configuración de logging
 logging.basicConfig(
@@ -203,6 +214,38 @@ def process_audio_job(job_id, file_path, config):
         # Actualizar métricas
         with metrics_lock:
             metrics['failed_jobs'] += 1
+
+@app.route('/', methods=['GET'])
+def index():
+    """Endpoint raíz - Redirige a la app de Vercel"""
+    from flask import redirect
+    
+    # URL de tu app en Vercel (cámbiala por la tuya)
+    VERCEL_APP_URL = os.getenv('VERCEL_APP_URL', 'https://diaresis.vercel.app')
+    
+    # Si es una petición desde el navegador, redirigir
+    user_agent = request.headers.get('User-Agent', '')
+    if 'Mozilla' in user_agent or 'Chrome' in user_agent:
+        return redirect(VERCEL_APP_URL)
+    
+    # Si es una petición de API (curl, fetch, etc), devolver info
+    return jsonify({
+        'name': 'Diaresis API',
+        'version': '1.0.0',
+        'description': 'API de diarización de speakers con IA',
+        'app_url': VERCEL_APP_URL,
+        'endpoints': {
+            'health': '/health',
+            'metrics': '/metrics',
+            'upload': 'POST /upload',
+            'job_status': 'GET /job/<job_id>',
+            'download_speaker': 'GET /job/<job_id>/download/<speaker_id>',
+            'list_jobs': 'GET /jobs',
+            'system_info': 'GET /system'
+        },
+        'docs': 'https://github.com/devidbarreiro/diaresis',
+        'status': 'operational'
+    })
 
 @app.route('/health', methods=['GET'])
 @log_request

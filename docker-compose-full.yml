@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # API Backend (Flask)
+  diaresis-api:
+    build: .
+    container_name: diaresis-api
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./output:/app/output
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - diaresis-network
+
+  # Frontend (Next.js)
+  diaresis-frontend:
+    build:
+      context: ./vercel
+      dockerfile: Dockerfile
+    container_name: diaresis-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://51.91.166.216:5000
+    depends_on:
+      - diaresis-api
+    restart: unless-stopped
+    networks:
+      - diaresis-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: diaresis-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - diaresis-api
+      - diaresis-frontend
+    restart: unless-stopped
+    networks:
+      - diaresis-network
+
+networks:
+  diaresis-network:
+    driver: bridge
+
