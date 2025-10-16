@@ -1,5 +1,5 @@
 # Dockerfile para Diaresis API
-FROM python:3.14-slim
+FROM python:3.11-slim
 
 # Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
